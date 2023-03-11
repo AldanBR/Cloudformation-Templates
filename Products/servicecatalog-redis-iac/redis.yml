@@ -1,0 +1,299 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: AWS Elasticache Redis template
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "Redis Cluster Product Details"
+        Parameters:
+          - Env
+          - ClusterName
+          - CacheNodeType
+          - EngineVersion
+          - NumCacheClusters
+      
+      - Label:
+          default: Does this resource have Payment Card Information?
+        Parameters:
+          - PCIScope
+
+      - Label:
+          default: Tags
+        Parameters:
+          - BusinessUnit
+          - Customer
+          - Application
+          - Owner
+          
+
+Parameters:
+  Env:
+    Description:            Please specify the Environment. Used for tagging   
+    Type:                   String
+    AllowedValues:
+      - dev
+      - qa
+      - hml
+      - prd 
+      - shared   
+
+  ClusterName:
+    Description:            Please specify the cache cluster name
+    Type:                   String
+    MinLength:              '3'
+    MaxLength:              '30'
+    ConstraintDescription:  Name must have between 3 and 30 chars
+
+  CacheNodeType:
+    Description:            Please specify the instance type the nodes will launch under.
+    Type:                   String
+    AllowedValues:
+      - cache.t3.micro
+      - cache.t3.small
+      - cache.t3.medium
+      - cache.m5.large
+      - cache.m5.xlarge
+      - cache.m5.2xlarge
+      - cache.m5.4xlarge
+      - cache.m5.12xlarge
+      - cache.m5.24xlarge
+      - cache.r5.large
+      - cache.r5.xlarge
+      - cache.r5.2xlarge
+      - cache.r5.4xlarge
+      - cache.r5.12xlarge
+      - cache.r5.24xlarge
+
+  EngineVersion:
+    Description:            Please specify the Redis version
+    Type:                   String
+    AllowedValues:
+      - 6.2
+      - 6.0
+      - 5.0.0
+      - 4.0.10
+
+  NumCacheClusters:
+    Description: >-
+                            The number of cache clusters for this replication group. If 'Env'is PRD the MultiAZ
+                            support is enabled, you must specify a value greater than 1.
+    Type:                   Number
+    MinValue:               '1'
+    MaxValue:               '6'
+
+  BusinessUnit:
+    Description: Please specify the BusinessUnit. Used for taggiPCIScopeng  
+    Type: String
+
+  Customer:
+    Description: Please specify the Customer. Used for tagging  
+    Type: String
+
+  Application:
+    Description: Please specify the Application. Used for tagging  
+    Type: String
+
+  Owner:
+    Description: Please specify the Owner. Used for tagging  
+    Type: String
+
+  PCIScope:
+    Description: Please specify the PCIScope. Used for tagging.
+    Type: String                  
+    AllowedValues:
+      - true
+      - false
+
+Mappings:
+  Networking:
+    dev:
+      VpcId: vpc-0df31a6e2d113d8b7
+      CidrIp: 10.214.0.0/16
+      SubnetIds: [subnet-04f9462620240c5c1, subnet-00c7176f1c6f72c32, subnet-0961dd9a7d368e1b0]
+    qa:
+      VpcId: vpc-053bf362926211174
+      CidrIp: 10.213.0.0/16
+      SubnetIds: [subnet-072a2bb7403ab352d, subnet-0cab7f62fa3a5fb6a, subnet-0483b8f9462493293]
+    hml:
+      VpcId: vpc-053bf362926211174
+      CidrIp: 10.213.0.0/16
+      SubnetIds: [subnet-072a2bb7403ab352d, subnet-0cab7f62fa3a5fb6a, subnet-0483b8f9462493293]
+    shared:
+      VpcId: vpc-08288f81ebea271f7
+      CidrIp: 10.196.0.0/17	
+      SubnetIds: [subnet-0e93473763fa450b1, subnet-0b019abba9660ceb5, subnet-08bd332bd2b20e449]
+    prd:
+      VpcId: vpc-05583dab4737e64fd
+      CidrIp: 10.197.128.0/17
+      SubnetIds: [subnet-0a0c6c1b76845ca8a, subnet-0d2dc2da1fb208470, subnet-0446d425f47765e5b]
+
+    
+  PCINETworking:
+    prd:
+      VpcId: vpc-028b0a127e9669159
+      CidrIp: 10.193.0.0/17
+      SubnetIds: [subnet-043f9f65b27011e69, subnet-022a5397e1b41bab5, subnet-0c86f16dcd5f3b1b6]
+
+  
+Conditions:
+  isPrd: !Equals [ !Ref Env, prd ]
+  IsPCI: !Equals [!Ref PCIScope, true]
+
+Resources:
+  ElasticacheRedis:
+    Type: AWS::ElastiCache::ReplicationGroup
+    Properties:
+      AutomaticFailoverEnabled: !If [ isPrd, true, false ]
+      CacheNodeType: !Ref CacheNodeType
+      CacheSubnetGroupName: !Ref SubnetGroupPrivate
+      Engine: redis
+      EngineVersion: !Ref EngineVersion      
+      NumCacheClusters: !If [ isPrd, !Ref NumCacheClusters, 1 ]
+      MultiAZEnabled: !If [ isPrd, true, false ]
+      Port: 6379
+      PreferredMaintenanceWindow: sun:22:00-sun:23:00
+      ReplicationGroupDescription: !Sub ReplicationGroup for ${ClusterName}
+      ReplicationGroupId: !Sub ${ClusterName}
+      SecurityGroupIds:
+        - !Ref SecurityGroupRedis
+      SnapshotRetentionLimit: !If [ isPrd, 7, 0 ]
+      SnapshotWindow: 03:00-05:00
+      KmsKeyId: !Ref KmsKey
+      TransitEncryptionEnabled: true
+      AtRestEncryptionEnabled: true
+      Tags:
+      - Key: businnes_unit
+        Value: !Ref BusinessUnit
+      - Key: customer
+        Value: !Ref Customer
+      - Key: env
+        Value: !Ref Env
+      - Key: application
+        Value: !Ref Application
+      - Key: owner
+        Value: !Ref Owner
+      - Key: pci_scope
+        Value: !Ref PCIScope
+
+  KmsKey:
+    Type: AWS::KMS::Key
+    Properties: 
+      Description: KMS Key for Redis Secret encryption 
+      Enabled: True
+      EnableKeyRotation: True
+      KeyPolicy:
+        Version: '2012-10-17'
+        Id: key-default-1
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action: kms:*
+            Resource: '*'
+          - Sid: Enable Redis Permissions
+            Effect: Allow
+            Principal:
+              Service: elasticache.amazonaws.com
+            Action: 
+              - kms:Encrypt*
+              - kms:Decrypt*
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:Describe*
+            Resource: '*'
+
+  SubnetGroupPrivate:
+    Type: AWS::ElastiCache::SubnetGroup
+    Properties:
+      Description: Subnet Group private for Redis
+      CacheSubnetGroupName: redis-subnet-group-private
+      SubnetIds: !If [IsPCI, Fn::FindInMap: [PCINETworking, !Ref Env, SubnetIds], Fn::FindInMap: [Networking, !Ref Env, SubnetIds]] 
+      Tags:
+      - Key: businnes_unit
+        Value: !Ref BusinessUnit
+      - Key: customer
+        Value: !Ref Customer
+      - Key: env
+        Value: !Ref Env
+      - Key: application
+        Value: !Ref Application
+      - Key: owner
+        Value: !Ref Owner
+      - Key: pci_scope
+        Value: !Ref PCIScope
+
+  SecurityGroupRedis:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !If [IsPCI, Fn::FindInMap: [PCINETworking, !Ref Env, VpcId], Fn::FindInMap: [Networking, !Ref Env, VpcId]]
+      GroupDescription: !Sub Redis-SecurityGroup${ClusterName}
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        Description: Allow VPC access
+        CidrIp: !If [IsPCI, Fn::FindInMap: [PCINETworking, !Ref Env, CidrIp], Fn::FindInMap: [Networking, !Ref Env, CidrIp]] 
+        FromPort: 6379
+        ToPort: 6379
+      - IpProtocol: tcp
+        Description: Allow VPN access 
+        CidrIp: 10.190.0.0/22
+        FromPort: 6379
+        ToPort: 6379
+      SecurityGroupEgress:
+      - IpProtocol: '-1'
+        Description: Allow VPC access
+        CidrIp: !If [IsPCI, Fn::FindInMap: [PCINETworking, !Ref Env, CidrIp], Fn::FindInMap: [Networking, !Ref Env, CidrIp]] 
+      - IpProtocol: '-1'
+        Description: Allow VPN access
+        CidrIp: 10.190.0.0/22
+      Tags:
+        - Key: businnes_unit
+          Value: !Ref BusinessUnit
+        - Key: customer
+          Value: !Ref Customer
+        - Key: env
+          Value: !Ref Env
+        - Key: application
+          Value: !Ref Application
+        - Key: owner
+          Value: !Ref Owner
+        - Key: pci_scope
+          Value: !Ref PCIScope
+
+Outputs:
+  SecurityGroupRedis:
+    Value: !Ref SecurityGroupRedis
+    Export:
+      Name: !Join
+        - '-'
+        - - !Ref ClusterName 
+          - redis-security-group
+          - !Ref Env
+
+  RGEndpoint:
+    Description: The primary endpoint location with port
+    Value: !Join 
+      - ''
+      - - 'redis://'
+        - !GetAtt 
+          - ElasticacheRedis
+          - PrimaryEndPoint.Address
+        - ':'
+        - !GetAtt 
+          - ElasticacheRedis
+          - PrimaryEndPoint.Port
+
+  RGPrimaryEndpoint:
+    Description: The primary endpoint location
+    Value: !Join 
+      - ''
+      - - !GetAtt 
+          - ElasticacheRedis
+          - PrimaryEndPoint.Address
+        
+  ClusterName:
+    Description: 'The name of the cluster'
+    Value: !Ref ElasticacheRedis
+    Export:
+      Name: !Sub '${ClusterName}-ClusterName'

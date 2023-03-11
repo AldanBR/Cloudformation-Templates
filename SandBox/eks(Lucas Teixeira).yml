@@ -1,0 +1,832 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Template para criação do Cluster EKS nos padrões Dock.
+
+Metadata:
+  'AWS::CloudFormation::Interface':
+    ParameterGroups:
+      - Label:
+          default: EKS Product Details
+        Parameters:
+          - Env
+          - ClusterName
+          - ClusterVersion
+
+      - Label:
+          default: Does this resource have Payment Card Information?
+        Parameters:
+          - PCIScope
+
+      - Label:
+          default: Tags
+        Parameters:
+          - BusinessUnit
+          - Customer
+          - Application
+          - Owner
+
+Parameters:
+  Env:
+    Description: Please specify the Environment this account (dev, qa, hml, prd, shared). Used for tagging
+    Type: String
+    AllowedValues:
+      - dev
+      - qa
+      - hml
+      - prd
+      - shared
+
+  ClusterVersion:
+    Description: Please specify EKS Cluster Version
+    Type: String
+    AllowedValues:
+      - '1.21'
+      - '1.22'
+      - '1.23'
+      - '1.24'
+
+  BusinessUnit:
+    Description: Please specify the BusinessUnit. Used for tagging  
+    Type: String
+
+  Customer:
+    Description: Please specify the Customer. Used for tagging  
+    Type: String
+
+  Application:
+    Description: Please specify the Application. Used for tagging  
+    Type: String
+
+  Owner:
+    Description: Please specify the Owner. Used for tagging  
+    Type: String
+
+  PCIScope:
+    Description: Please specify the PCIScope. Used for tagging.
+    Type: String
+    AllowedValues:
+      - true
+      - false
+
+  ClusterName:
+    Description: Please specify the Cluster Name.
+    Type: String
+
+Conditions:
+  #IsPRD: !Equals [!Ref AWS::Region, 'sa-east-1']
+  IsPCI: !Equals [!Ref PCIScope, true]
+  
+Mappings:
+  Cluster:
+    EndpointPrivateAccess:
+      Access: true
+    EndpointPublicAccess:
+      Access: false
+
+  Networking:
+    dev:
+      VpcId: vpc-0df31a6e2d113d8b7
+      CidrIp: 10.214.0.0/16
+      SubnetIds: [subnet-0ca2d45be9d6ab5bc, subnet-0b2b57acbb1da0623, subnet-05d3e7f4611c12a23]
+    qa:
+      VpcId: vpc-053bf362926211174
+      CidrIp: 10.213.0.0/16
+      SubnetIds: [subnet-0fb3b86a8657a696f, subnet-0fb6727ed0041b799, subnet-0c45c1b6d9ba2cfc5]
+    hml:
+      VpcId: vpc-053bf362926211174
+      CidrIp: 10.213.0.0/16
+      SubnetIds: [subnet-0fb3b86a8657a696f, subnet-0fb6727ed0041b799, subnet-0c45c1b6d9ba2cfc5]
+    shared:
+      VpcId: vpc-08288f81ebea271f7
+      CidrIp: 10.196.0.0/17	
+      SubnetIds: [subnet-0e93473763fa450b1, subnet-0b019abba9660ceb5, subnet-08bd332bd2b20e449]
+    prd:
+      VpcId: vpc-05583dab4737e64fd
+      CidrIp: 10.197.128.0/17
+      SubnetIds: [subnet-0a0c6c1b76845ca8a, subnet-0d2dc2da1fb208470, subnet-0446d425f47765e5b]
+
+  PCINetworking:
+    prd:
+      VpcId: vpc-028b0a127e9669159
+      CidrIp: 10.193.0.0/17
+      SubnetIds: [subnet-043f9f65b27011e69, subnet-022a5397e1b41bab5, subnet-0c86f16dcd5f3b1b6]
+    
+Resources:
+  ClusterRole:
+
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Allows EKS to manage clusters on your behalf
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+            Effect: Allow
+            Principal:
+              Service:
+                - eks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEKSClusterPolicy
+        - arn:aws:iam::aws:policy/AmazonEKSServicePolicy
+        - arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
+
+  ClusterAutoScalingRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: 
+        !Join
+          - '-'
+          - - eks-cluster-autoscaler
+            - !Ref ClusterName
+      AssumeRolePolicyDocument: !Sub 
+        - |
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Principal": {
+                  "Federated": "arn:aws:iam::${AWS::AccountId}:oidc-provider/oidc.eks.${AWS::Region}.amazonaws.com/id/${eksId}"
+                },
+                "Action": "sts:AssumeRoleWithWebIdentity",
+                "Condition": {
+                  "StringEquals": {
+                    "${eksEndpoint}:sub": "system:serviceaccount:kube-system:cluster-autoscaler"
+                  }
+                }
+              }
+            ]
+          }
+        - eksId:
+            !Select [ 4, !Split ["/", !GetAtt Cluster.OpenIdConnectIssuerUrl ]]
+          eksEndpoint:
+            !Select [ 1, !Split [ "//", !GetAtt Cluster.OpenIdConnectIssuerUrl ]]        
+      Policies:
+        - PolicyName:
+            !Join
+              - '-'
+              - - eks-cluster-autoscaler
+                - !Ref Cluster        
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: 
+                  - 'autoscaling:DescribeAutoScalingGroups'
+                  - 'autoscaling:DescribeAutoScalingInstances'
+                  - 'autoscaling:DescribeLaunchConfigurations'
+                  - 'autoscaling:DescribeTags'
+                  - 'autoscaling:SetDesiredCapacity'
+                  - 'autoscaling:TerminateInstanceInAutoScalingGroup'
+                  - 'ec2:DescribeLaunchTemplateVersions'
+                  - 'ec2:DescribeInstanceTypes'
+                Resource: '*'
+      Tags:
+        - Key: businnes_unit
+          Value: !Ref BusinessUnit
+        - Key: customer
+          Value: !Ref Customer
+        - Key: env
+          Value: !Ref Env
+        - Key: application
+          Value: !Ref Application
+        - Key: owner
+          Value: !Ref Owner
+        - Key: pci_scope
+          Value: !Ref PCIScope
+
+  ClusterLoadBalancerControlerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        !Join
+          - '-'
+          - - eks-loadbalancer-controller
+            - !Ref Cluster
+      AssumeRolePolicyDocument: !Sub 
+        - |
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Principal": {
+                  "Federated": "arn:aws:iam::${AWS::AccountId}:oidc-provider/oidc.eks.${AWS::Region}.amazonaws.com/id/${eksId}"
+                },
+                "Action": "sts:AssumeRoleWithWebIdentity",
+                "Condition": {
+                  "StringEquals": {
+                    "${eksEndpoint}:sub": "system:serviceaccount:kube-system:loadbalancer-controller"
+                  }
+                }
+              }
+            ]
+          }
+        - eksId:
+            !Select [ 4, !Split ["/", !GetAtt Cluster.OpenIdConnectIssuerUrl ]]
+          eksEndpoint:
+            !Select [ 1, !Split [ "//", !GetAtt Cluster.OpenIdConnectIssuerUrl ]]
+      Policies:
+        - PolicyName:
+            !Join
+              - '-'
+              - - eks-loadbalancer-controller
+                - !Ref Cluster
+          PolicyDocument: 
+            {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Action": [
+                            "iam:CreateServiceLinkedRole",
+                            "ec2:DescribeAccountAttributes",
+                            "ec2:DescribeAddresses",
+                            "ec2:DescribeAvailabilityZones",
+                            "ec2:DescribeInternetGateways",
+                            "ec2:DescribeVpcs",
+                            "ec2:DescribeSubnets",
+                            "ec2:DescribeSecurityGroups",
+                            "ec2:DescribeInstances",
+                            "ec2:DescribeNetworkInterfaces",
+                            "ec2:DescribeTags",
+                            "ec2:GetCoipPoolUsage",
+                            "ec2:DescribeCoipPools",
+                            "elasticloadbalancing:DescribeLoadBalancers",
+                            "elasticloadbalancing:DescribeLoadBalancerAttributes",
+                            "elasticloadbalancing:DescribeListeners",
+                            "elasticloadbalancing:DescribeListenerCertificates",
+                            "elasticloadbalancing:DescribeSSLPolicies",
+                            "elasticloadbalancing:DescribeRules",
+                            "elasticloadbalancing:DescribeTargetGroups",
+                            "elasticloadbalancing:DescribeTargetGroupAttributes",
+                            "elasticloadbalancing:DescribeTargetHealth",
+                            "elasticloadbalancing:DescribeTags"
+                        ],
+                        "Resource": "*"
+                    },
+                    {
+                        "Effect": "Allow",
+                        "Action": [
+                            "cognito-idp:DescribeUserPoolClient",
+                            "acm:ListCertificates",
+                            "acm:DescribeCertificate",
+                            "iam:ListServerCertificates",
+                            "iam:GetServerCertificate",
+                            "waf-regional:GetWebACL",
+                            "waf-regional:GetWebACLForResource",
+                            "waf-regional:AssociateWebACL",
+                            "waf-regional:DisassociateWebACL",
+                            "wafv2:GetWebACL",
+                            "wafv2:GetWebACLForResource",
+                            "wafv2:AssociateWebACL",
+                            "wafv2:DisassociateWebACL",
+                            "shield:GetSubscriptionState",
+                            "shield:DescribeProtection",
+                            "shield:CreateProtection",
+                            "shield:DeleteProtection"
+                        ],
+                        "Resource": "*"
+                    },
+                    {
+                        "Effect": "Allow",
+                        "Action": [
+                            "ec2:AuthorizeSecurityGroupIngress",
+                            "ec2:RevokeSecurityGroupIngress"
+                        ],
+                        "Resource": "*"
+                    },
+                    {
+                        "Effect": "Allow",
+                        "Action": [
+                            "ec2:CreateSecurityGroup"
+                        ],
+                        "Resource": "*"
+                    },
+                    {
+                        "Effect": "Allow",
+                        "Action": [
+                            "ec2:CreateTags"
+                        ],
+                        "Resource": "arn:aws:ec2:*:*:security-group/*",
+                        "Condition": {
+                            "StringEquals": {
+                                "ec2:CreateAction": "CreateSecurityGroup"
+                            },
+                            "Null": {
+                                "aws:RequestTag/elbv2.k8s.aws/cluster": "false"
+                            }
+                        }
+                    },
+                    {
+                        "Effect": "Allow",
+                        "Action": [
+                            "ec2:CreateTags",
+                            "ec2:DeleteTags"
+                        ],
+                        "Resource": "arn:aws:ec2:*:*:security-group/*",
+                        "Condition": {
+                            "Null": {
+                                "aws:RequestTag/elbv2.k8s.aws/cluster": "true",
+                                "aws:ResourceTag/elbv2.k8s.aws/cluster": "false"
+                            }
+                        }
+                    },
+                    {
+                        "Effect": "Allow",
+                        "Action": [
+                            "ec2:AuthorizeSecurityGroupIngress",
+                            "ec2:RevokeSecurityGroupIngress",
+                            "ec2:DeleteSecurityGroup"
+                        ],
+                        "Resource": "*",
+                        "Condition": {
+                            "Null": {
+                                "aws:ResourceTag/elbv2.k8s.aws/cluster": "false"
+                            }
+                        }
+                    },
+                    {
+                        "Effect": "Allow",
+                        "Action": [
+                            "elasticloadbalancing:CreateLoadBalancer",
+                            "elasticloadbalancing:CreateTargetGroup"
+                        ],
+                        "Resource": "*",
+                        "Condition": {
+                            "Null": {
+                                "aws:RequestTag/elbv2.k8s.aws/cluster": "false"
+                            }
+                        }
+                    },
+                    {
+                        "Effect": "Allow",
+                        "Action": [
+                            "elasticloadbalancing:CreateListener",
+                            "elasticloadbalancing:DeleteListener",
+                            "elasticloadbalancing:CreateRule",
+                            "elasticloadbalancing:DeleteRule"
+                        ],
+                        "Resource": "*"
+                    },
+                    {
+                        "Effect": "Allow",
+                        "Action": [
+                            "elasticloadbalancing:AddTags",
+                            "elasticloadbalancing:RemoveTags"
+                        ],
+                        "Resource": [
+                            "arn:aws:elasticloadbalancing:*:*:targetgroup/*/*",
+                            "arn:aws:elasticloadbalancing:*:*:loadbalancer/net/*/*",
+                            "arn:aws:elasticloadbalancing:*:*:loadbalancer/app/*/*"
+                        ],
+                        "Condition": {
+                            "Null": {
+                                "aws:RequestTag/elbv2.k8s.aws/cluster": "true",
+                                "aws:ResourceTag/elbv2.k8s.aws/cluster": "false"
+                            }
+                        }
+                    },
+                    {
+                        "Effect": "Allow",
+                        "Action": [
+                            "elasticloadbalancing:AddTags",
+                            "elasticloadbalancing:RemoveTags"
+                        ],
+                        "Resource": [
+                            "arn:aws:elasticloadbalancing:*:*:listener/net/*/*/*",
+                            "arn:aws:elasticloadbalancing:*:*:listener/app/*/*/*",
+                            "arn:aws:elasticloadbalancing:*:*:listener-rule/net/*/*/*",
+                            "arn:aws:elasticloadbalancing:*:*:listener-rule/app/*/*/*"
+                        ]
+                    },
+                    {
+                        "Effect": "Allow",
+                        "Action": [
+                            "elasticloadbalancing:ModifyLoadBalancerAttributes",
+                            "elasticloadbalancing:SetIpAddressType",
+                            "elasticloadbalancing:SetSecurityGroups",
+                            "elasticloadbalancing:SetSubnets",
+                            "elasticloadbalancing:DeleteLoadBalancer",
+                            "elasticloadbalancing:ModifyTargetGroup",
+                            "elasticloadbalancing:ModifyTargetGroupAttributes",
+                            "elasticloadbalancing:DeleteTargetGroup"
+                        ],
+                        "Resource": "*",
+                        "Condition": {
+                            "Null": {
+                                "aws:ResourceTag/elbv2.k8s.aws/cluster": "false"
+                            }
+                        }
+                    },
+                    {
+                        "Effect": "Allow",
+                        "Action": [
+                            "elasticloadbalancing:RegisterTargets",
+                            "elasticloadbalancing:DeregisterTargets"
+                        ],
+                        "Resource": "arn:aws:elasticloadbalancing:*:*:targetgroup/*/*"
+                    },
+                    {
+                        "Effect": "Allow",
+                        "Action": [
+                            "elasticloadbalancing:SetWebAcl",
+                            "elasticloadbalancing:ModifyListener",
+                            "elasticloadbalancing:AddListenerCertificates",
+                            "elasticloadbalancing:RemoveListenerCertificates",
+                            "elasticloadbalancing:ModifyRule"
+                        ],
+                        "Resource": "*"
+                    }
+                ]
+            }
+      Tags:
+        - Key: businnes_unit
+          Value: !Ref BusinessUnit
+        - Key: customer
+          Value: !Ref Customer
+        - Key: env
+          Value: !Ref Env
+        - Key: application
+          Value: !Ref Application
+        - Key: owner
+          Value: !Ref Owner
+        - Key: pci_scope
+          Value: !Ref PCIScope
+
+  ClusterExternalDns:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        !Join
+          - '-'
+          - - eks-external-dns
+            - !Ref Cluster
+      AssumeRolePolicyDocument: !Sub 
+        - |
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Principal": {
+                  "Federated": "arn:aws:iam::${AWS::AccountId}:oidc-provider/oidc.eks.${AWS::Region}.amazonaws.com/id/${eksId}"                   
+                },
+                "Action": "sts:AssumeRoleWithWebIdentity",
+                "Condition": {
+                  "StringEquals": {
+                    "${eksEndpoint}:sub": "system:serviceaccount:kube-system:external-dns"
+                  }
+                }
+              }
+            ]
+          }
+        - eksId:
+            !Select [ 4, !Split ["/", !GetAtt Cluster.OpenIdConnectIssuerUrl ]]
+          eksEndpoint:
+            !Select [ 1, !Split [ "//", !GetAtt Cluster.OpenIdConnectIssuerUrl ]]
+      Policies:
+        - PolicyName:
+            !Join
+              - '-'
+              - - eks-external-dns
+                - !Ref Cluster
+          PolicyDocument:
+            {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Action": [
+                            "route53:ChangeResourceRecordSets"
+                        ],
+                        "Resource": [
+                            "arn:aws:route53:::hostedzone/*"
+                        ]
+                    },
+                    {
+                        "Effect": "Allow",
+                        "Action": [
+                            "route53:ListHostedZones",
+                            "route53:ListResourceRecordSets"
+                        ],
+                        "Resource": [
+                            "*"
+                        ]
+                    }
+                ]
+            }
+      Tags:
+        - Key: businnes_unit
+          Value: !Ref BusinessUnit
+        - Key: customer
+          Value: !Ref Customer
+        - Key: env
+          Value: !Ref Env
+        - Key: application
+          Value: !Ref Application
+        - Key: owner
+          Value: !Ref Owner
+        - Key: pci_scope
+          Value: !Ref PCIScope
+
+  ClusterExternalSecret:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        !Join
+          - '-'
+          - - eks-external-secret
+            - !Ref Cluster      
+      AssumeRolePolicyDocument: !Sub 
+        - |
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Principal": {
+                  "Federated": "arn:aws:iam::${AWS::AccountId}:oidc-provider/oidc.eks.${AWS::Region}.amazonaws.com/id/${eksId}"
+                },
+                "Action": "sts:AssumeRoleWithWebIdentity",
+                "Condition": {
+                  "StringEquals": {
+                    "${eksEndpoint}:sub": "system:serviceaccount:kube-system:external-secret"
+                  }
+                }
+              }
+            ]
+          }
+        - eksId:
+            !Select [ 4, !Split ["/", !GetAtt Cluster.OpenIdConnectIssuerUrl ]]
+          eksEndpoint:
+            !Select [ 1, !Split [ "//", !GetAtt Cluster.OpenIdConnectIssuerUrl ]]
+      Policies:
+        - PolicyName:
+            !Join
+              - '-'
+              - - eks-external-secret
+                - !Ref Cluster        
+          PolicyDocument:
+            {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Action": [
+                            "secretsmanager:GetResourcePolicy",
+                            "secretsmanager:GetSecretValue",
+                            "secretsmanager:DescribeSecret",
+                            "secretsmanager:ListSecretVersionIds"
+                        ],
+                        "Resource": "*"
+                    }
+                ]
+            }
+        - PolicyName: k8s-ssm-policy
+          PolicyDocument:
+            {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Action": "ssm:GetParameter",
+                        "Resource": "*"
+                    }
+                ]
+            }
+      Tags:
+        - Key: businnes_unit
+          Value: !Ref BusinessUnit
+        - Key: customer
+          Value: !Ref Customer
+        - Key: env
+          Value: !Ref Env
+        - Key: application
+          Value: !Ref Application
+        - Key: owner
+          Value: !Ref Owner
+        - Key: pci_scope
+          Value: !Ref PCIScope
+
+  ClusterFluentBitCloudWatch:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        !Join
+          - '-'
+          - - eks-fluentbit-cloudwatch
+            - !Ref Cluster
+      AssumeRolePolicyDocument: !Sub 
+        - |
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Principal": {
+                  "Federated": "arn:aws:iam::${AWS::AccountId}:oidc-provider/oidc.eks.${AWS::Region}.amazonaws.com/id/${eksId}"
+                },
+                "Action": "sts:AssumeRoleWithWebIdentity",
+                "Condition": {
+                  "StringEquals": {
+                    "${eksEndpoint}:sub": "system:serviceaccount:amazon-cloudwatch:fluent-bit"
+                  }
+                }
+              }
+            ]
+          }
+        - eksId:
+            !Select [ 4, !Split ["/", !GetAtt Cluster.OpenIdConnectIssuerUrl ]]
+          eksEndpoint:
+            !Select [ 1, !Split [ "//", !GetAtt Cluster.OpenIdConnectIssuerUrl ]]
+      Policies:
+        - PolicyName:
+            !Join
+              - '-'
+              - - eks-fluentbit-cloudwatch
+                - !Ref Cluster
+          PolicyDocument:
+            {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Action": [
+                            "logs:PutLogEvents",
+                            "logs:CreateLogGroup",
+                            "logs:PutRetentionPolicy",
+                            "logs:CreateLogStream",
+                            "logs:DescribeLogGroups",
+                            "logs:DescribeLogStreams"
+                        ],
+                        "Resource": "*"
+                    }
+                ]
+            }
+      Tags:
+        - Key: businnes_unit
+          Value: !Ref BusinessUnit
+        - Key: customer
+          Value: !Ref Customer
+        - Key: env
+          Value: !Ref Env
+        - Key: application
+          Value: !Ref Application
+        - Key: owner
+          Value: !Ref Owner
+        - Key: pci_scope
+          Value: !Ref PCIScope
+
+  Cluster:
+    Type: AWS::EKS::Cluster
+    Properties:
+      Name: !Ref ClusterName
+      EncryptionConfig:
+        - Resources: [ secrets ]
+          Provider:
+            KeyArn: !GetAtt KmsKey.Arn       
+      Version: !Ref ClusterVersion
+      RoleArn: !GetAtt ClusterRole.Arn
+      ResourcesVpcConfig:
+        EndpointPrivateAccess: !FindInMap [ Cluster, EndpointPrivateAccess, Access ]
+        EndpointPublicAccess: !FindInMap [ Cluster, EndpointPrivateAccess, Access ]
+        SecurityGroupIds:
+          - !Ref ControlPlaneSecurityGroup
+        SubnetIds: !If [IsPCI, Fn::FindInMap: [PCINetworking, !Ref Env, SubnetIds], Fn::FindInMap: [Networking, !Ref Env, SubnetIds]]  ##!FindInMap [Networking, !Ref Env, SubnetIds]
+      Logging:
+        ClusterLogging:
+          EnabledTypes:
+            - Type: api
+            - Type: audit
+            - Type: authenticator   
+
+  OidcEKS:
+    Type: AWS::IAM::OIDCProvider
+    Properties: 
+      ClientIdList:
+        - sts.amazonaws.com
+      ThumbprintList: 
+        - 9e99a48a9960b14926bb7f3b02e22da2b0ab7280 
+      Url: !GetAtt Cluster.OpenIdConnectIssuerUrl
+      Tags:
+        - Key: businnes_unit
+          Value: !Ref BusinessUnit
+        - Key: customer
+          Value: !Ref Customer
+        - Key: env
+          Value: !Ref Env
+        - Key: application
+          Value: !Ref Application
+        - Key: owner
+          Value: !Ref Owner
+        - Key: pci_scope
+          Value: !Ref PCIScope
+
+  ControlPlaneSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Cluster communication with worker nodes
+      SecurityGroupIngress:
+      - CidrIp: 10.190.0.0/22
+        FromPort: 443
+        IpProtocol: tcp
+        ToPort: 443
+      - CidrIp: !If [IsPCI, Fn::FindInMap: [PCINetworking, !Ref Env, CidrIp], Fn::FindInMap: [Networking, !Ref Env, CidrIp]] ##!FindInMap [Networking, !Ref Env, CidrIp]
+        FromPort: 443
+        IpProtocol: tcp
+        ToPort: 443
+      - CidrIp: 10.70.39.84/32
+        FromPort: 443
+        ToPort: 443
+        IpProtocol: 'tcp'                              
+      SecurityGroupEgress:
+        - Description: Allow outbound traffic
+          IpProtocol: '-1'
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: 0.0.0.0/0
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Sub: "${ClusterName}/ControlPlaneSecurityGroup"      
+      VpcId: !If [IsPCI, Fn::FindInMap: [PCINetworking, !Ref Env, VpcId], Fn::FindInMap: [Networking, !Ref Env, VpcId]]
+
+  KmsKey:
+    Type: AWS::KMS::Key
+    Properties: 
+      Description: KMS Key for EKS Secret encryption 
+      Enabled: True
+      EnableKeyRotation: True
+      KeyPolicy:
+        Version: '2012-10-17'
+        Id: key-default-1
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action: kms:*
+            Resource: '*'
+          - Sid: Enable EKS Permissions
+            Effect: Allow
+            Principal:
+              Service: eks.amazonaws.com
+            Action: 
+              - kms:Encrypt*
+              - kms:Decrypt*
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:Describe*
+            Resource: '*'
+
+  CertificateAuthorityParameterStore:
+    Type: AWS::SSM::Parameter
+    Properties: 
+      DataType: text
+      Description: !Sub Certificate Authority Data of ${Cluster}
+      Name: !Ref Cluster
+      Type: String
+      Value: !GetAtt Cluster.CertificateAuthorityData
+      Tags:
+        businnes_unit: !Ref BusinessUnit
+        customer: !Ref Customer
+        env: !Ref Env
+        application: !Ref Application
+        owner: !Ref Owner
+        pci_scope: !Ref PCIScope
+
+Outputs:
+  ClusterName:
+    Value: !Ref Cluster
+    Description: Cluster EKS Name
+    Export:
+      Name:
+        Fn::Sub: "${ClusterName}-EKS"
+
+  ClusterEndpoint:
+    Value: !GetAtt Cluster.Endpoint
+    Description: Cluster EKS Endpoint
+    Export:
+      Name:
+        Fn::Sub: "${ClusterName}-EKS-ClusterEndpoint"
+
+  ClusterSecurityGroupId:
+    Value: !GetAtt Cluster.ClusterSecurityGroupId    
+    Description: ControlPlaneSecurityGroup
+    Export:
+      Name:
+        Fn::Sub: "${ClusterName}-EKS-ClusterSecurityGroupId"
+
+  ClusterArn:
+    Value: !GetAtt Cluster.Arn
+    Description: Cluster Arn
+    Export:
+      Name:
+        Fn::Sub: "${ClusterName}-EKS-ClusterArn"
+  
+  ClusterOpenIdConnectIssuerUrl:
+    Value: !GetAtt Cluster.OpenIdConnectIssuerUrl
+    Description: Cluster OpenIdConnectIssuerUrl
+    Export:
+      Name:
+        Fn::Sub: "${ClusterName}-EKS-OpenIdConnectIssuerUrls"

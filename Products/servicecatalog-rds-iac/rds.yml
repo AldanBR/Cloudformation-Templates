@@ -1,0 +1,437 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: AWS RDS
+
+Metadata:
+  'AWS::CloudFormation::Interface':
+    ParameterGroups:
+      - Label:
+          default: Amazon RDS Database Configuration
+        Parameters:
+          - Env
+          - DBInstanceName
+          - Engine
+          - InstanceType
+          - StorageSize
+          - StorageType
+          - Iops
+          - BackupWindow
+          - MaintenanceWindow
+
+      - Label:
+          default: Amazon RDS PostgreSQL Database Access 
+        Parameters:
+          - DBName
+          - Port
+
+      - Label:
+          default: Does this resource have Payment Card Information?
+        Parameters:
+          - PCIScope
+      
+      # - Label:
+      #     default: Only SQL Server Instance
+      #   Parameters:
+      #     - LicenseSQLServer
+          
+      - Label:
+          default: Tags
+        Parameters:
+          - BusinessUnit
+          - Customer
+          - Application
+          - Owner
+
+Parameters:
+  DBInstanceName:
+    Type: String
+    Description: Database instance name.
+    MinLength: '3'
+    MaxLength: '40'
+    ConstraintDescription: Must be a valid name
+
+  DBName:
+    Type: String
+    MinLength: '1'
+    MaxLength: '64'
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    Default: "databasename"
+    Description: Required - Database name to configure
+    ConstraintDescription: Must begin with a letter and contain only alphanumeric characters.
+
+  Port:
+    Type: Number
+    Description: Database port number (Postgres - 5432, MySQL Server - 3306, SQLServer - 1433)
+    MinValue: '1024'
+    MaxValue: '65536'
+    ConstraintDescription: Must be a valid (non-restricted) port number
+    Default: 5432
+  
+  InstanceType:
+    Type: String
+    Description: The class of RDS instance to launch for the DB (database) tier.
+    Default: db.t3.micro
+    AllowedValues:
+      - 'db.t3.micro'
+      - 'db.t3.small'
+      - 'db.t3.medium'
+      - 'db.m5.large'
+      - 'db.m5.xlarge'
+      - 'db.m5.2xlarge'
+      - 'db.r5.large'
+      - 'db.r5.large'
+      - 'db.r5.xlarge'
+      - 'db.r5.2xlarge'
+
+  StorageSize:
+    Type: String
+    Description: Database storage size of RDS instance (GB)
+    Default: '20'
+    ConstraintDescription: Must be a valid size value (GB)
+    AllowedValues:
+      - '20'
+      - '40'
+      - '60'
+      - '80'
+      - '100'
+      - '120'
+      - '140'
+      - '160'
+      - '180'
+      - '200'
+      - '300'
+      - '400'
+      - '500'
+      - '600'
+      - '700'
+      - '800'
+      - '900'
+      - '1000'
+
+  StorageType:
+    Type: String
+    Description: Database storage type of RDS instance.
+    Default: gp2
+    ConstraintDescription: Must be a valid storage type value
+    AllowedValues:
+      - 'standard'
+      - 'gp2'
+      - 'io1'
+
+  Iops:
+    Type: Number
+    Description: The number of I/O operations per second (IOPS) that the database provisions - https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/CHAP_Storage.html#USER_PIOPS
+    Default: 1000
+    ConstraintDescription: The value must be equal to or greater than 1000.
+    
+  
+  Engine:
+    Type: String
+    Description: Database Engine.
+    ConstraintDescription: Must be a valid engine
+    Default: postgres
+    AllowedValues:
+      # - 'aurora'
+      # - 'aurora-mysql'
+      # - 'aurora-postgresql'
+      - 'mysql'
+      - 'postgres'
+      # - 'mariadb'
+      # - 'oracle-ee'
+      # - 'oracle-ee-cdb'
+      # - 'oracle-se2'
+      # - 'oracle-se2-cdb'
+      # - 'sqlserver-ee'
+      # - 'sqlserver-se'
+      # - 'sqlserver-ex'
+      # - 'sqlserver-web'
+  
+  BackupWindow:
+    Type: String
+    Description: Preferred Backup Window.
+    Default: 05:10-05:40
+    ConstraintDescription: Must be a valid backup window time range
+  
+  MaintenanceWindow:
+    Type: String
+    Description: Preferred Maintenance Window.
+    Default: sun:00:00-sun:02:00
+    ConstraintDescription: Must be a valid maintenance window time range
+
+  # LicenseSQLServer:
+  #   Type: String
+  #   Description: Applicable only SQL Server Engine
+  #   Default: ""
+  
+  Env:
+    Description: Please specify the Environment. If prd selected, MultiAZ database will be enable.
+    Type: String
+    AllowedValues:
+      - dev
+      - qa
+      - hml
+      - prd
+      - shared    
+  
+  BusinessUnit:
+    Description: Please specify the BusinessUnit. Used for tagging  
+    Type: String
+
+  Customer:
+    Description: Please specify the Customer. Used for tagging  
+    Type: String
+
+  Application:
+    Description: Please specify the Application. Used for tagging  
+    Type: String
+
+  Owner:
+    Description: Please specify the Owner. Used for tagging  
+    Type: String
+
+  PCIScope:
+    Description: Please specify the PCIScope. Used for tagging.
+    Type: String
+    AllowedValues:
+      - true
+      - false
+    
+Mappings:
+  Networking:
+    dev:
+      VpcId: vpc-0df31a6e2d113d8b7
+      CidrIp: 10.214.0.0/16
+      SubnetIds: [subnet-04f9462620240c5c1, subnet-00c7176f1c6f72c32, subnet-0961dd9a7d368e1b0]
+    qa:
+      VpcId: vpc-053bf362926211174
+      CidrIp: 10.213.0.0/16
+      SubnetIds: [subnet-072a2bb7403ab352d, subnet-0cab7f62fa3a5fb6a, subnet-0483b8f9462493293]
+    hml:
+      VpcId: vpc-053bf362926211174
+      CidrIp: 10.213.0.0/16
+      SubnetIds: [subnet-072a2bb7403ab352d, subnet-0cab7f62fa3a5fb6a, subnet-0483b8f9462493293]
+    shared:
+      VpcId: vpc-08288f81ebea271f7
+      CidrIp: 10.196.0.0/17	
+      SubnetIds: [subnet-0e93473763fa450b1, subnet-0b019abba9660ceb5, subnet-08bd332bd2b20e449]
+    prd:
+      VpcId: vpc-05583dab4737e64fd
+      CidrIp: 10.197.128.0/17
+      SubnetIds: [subnet-0a0c6c1b76845ca8a, subnet-0d2dc2da1fb208470, subnet-0446d425f47765e5b]
+
+    
+  PCINETworking:
+    prd:
+      VpcId: vpc-028b0a127e9669159
+      CidrIp: 10.193.0.0/17
+      SubnetIds: [subnet-043f9f65b27011e69, subnet-022a5397e1b41bab5, subnet-0c86f16dcd5f3b1b6]
+
+  Database:
+    aurora:
+      engineVersion: 5.6.mysql_aurora.1.23.4
+      familyVersion: aurora5.6
+    aurora-mysql:
+      engineVersion: 8.0.mysql_aurora.3.02.0
+      familyVersion: aurora-mysql8.0
+    aurora-postgresql:
+      engineVersion: 14.3
+      familyVersion: aurora-postgresql14
+    postgres:
+      engineVersion: 14.4
+      familyVersion: postgres14
+    mysql:
+      engineVersion: 8.0.28
+      familyVersion: mysql8.0
+
+Conditions:
+  isStorageTypeIo1: !Equals [ !Ref StorageType, io1]
+  # License: !Not [!Equals [!Ref LicenseSQLServer, ""]]
+  isPrd: !Equals [!Ref Env, prd ]
+  IsPCI: !Equals [!Ref PCIScope, true]
+  # isSqlServer: 
+  #   !Or 
+  #     - !Equals [!Ref Engine, sqlserver-ee]
+  #     - !Equals [!Ref Engine, sqlserver-se]
+  #     - !Equals [!Ref Engine, sqlserver-ex]
+  #     - !Equals [!Ref Engine, sqlserver-web]
+  
+  isDatabase: !Equals [!Ref Engine, postgres]
+
+      
+Resources: 
+
+  DBInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      AllocatedStorage: !Ref StorageSize
+      StorageType: !Ref StorageType
+      Iops: !If [isStorageTypeIo1, !Ref Iops, !Ref "AWS::NoValue"]
+      MasterUsername: !Join ['', ['{{resolve:secretsmanager:', !Ref DatabaseSecret, ':SecretString:username}}' ]]
+      MasterUserPassword: !Join ['', ['{{resolve:secretsmanager:', !Ref DatabaseSecret, ':SecretString:password}}' ]]
+      DBInstanceIdentifier: !Ref DBInstanceName
+      DBName: !Ref DBName
+      Engine: !Ref Engine
+      DBSubnetGroupName: !Ref SubnetGroup
+      DBInstanceClass: !Ref InstanceType
+      DBParameterGroupName: !If [isDatabase, !Ref DBParameterGroupPostgres, !Ref "AWS::NoValue"]
+      EngineVersion: !FindInMap [Database, !Ref Engine, engineVersion]
+      # LicenseModel: !If [License, !Ref LicenseSQLServer, !Ref "AWS::NoValue"]
+      Port: !Ref Port
+      MultiAZ: !If [isPrd, true, false]
+      AllowMajorVersionUpgrade: false
+      AutoMinorVersionUpgrade: false
+      PreferredBackupWindow: !Ref BackupWindow
+      PreferredMaintenanceWindow: !Ref MaintenanceWindow
+      StorageEncrypted: true
+      BackupRetentionPeriod: 7
+      CopyTagsToSnapshot: true
+      VPCSecurityGroups:
+        - !Ref SecurityGroupDB
+      Tags:
+        - Key: businnes_unit
+          Value: !Ref BusinessUnit
+        - Key: customer
+          Value: !Ref Customer
+        - Key: env
+          Value: !Ref Env
+        - Key: application
+          Value: !Ref Application
+        - Key: owner
+          Value: !Ref Owner
+        - Key: pci_scope
+          Value: !Ref PCIScope
+
+  DBParameterGroupPostgres:
+    Condition: isDatabase
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      Family: !FindInMap [Database, !Ref Engine, familyVersion]
+      Parameters:
+        rds.logical_replication: on
+        pgaudit.log_parameter: on
+        pg_stat_statements.max: 10000
+      Description: !Sub ${DBInstanceName}-parameter-group
+
+  SubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupName: !Sub ${DBInstanceName}-subnet-group
+      DBSubnetGroupDescription: This is the group of (private) subnets used by RDS.
+      SubnetIds: !If [IsPCI, Fn::FindInMap: [PCINETworking, !Ref Env, SubnetIds], Fn::FindInMap: [Networking, !Ref Env, SubnetIds]] 
+      Tags:
+        - Key: businnes_unit
+          Value: !Ref BusinessUnit
+        - Key: customer
+          Value: !Ref Customer
+        - Key: env
+          Value: !Ref Env
+        - Key: application
+          Value: !Ref Application
+        - Key: owner
+          Value: !Ref Owner
+        - Key: pci_scope
+          Value: !Ref PCIScope
+
+  DatabaseSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${DBInstanceName}-rds-access"
+      Description: "This secret has a dynamically generated secret password."
+      GenerateSecretString:
+        SecretStringTemplate: !Sub '{"username": "adminuser"}'
+        GenerateStringKey: "password"
+        PasswordLength: 30
+        ExcludeCharacters: '"@/\#|`^~.![]<>{}=+-;,?&%$*()'':'
+      Tags:
+        - Key: businnes_unit
+          Value: !Ref BusinessUnit
+        - Key: customer
+          Value: !Ref Customer
+        - Key: env
+          Value: !Ref Env
+        - Key: application
+          Value: !Ref Application
+        - Key: owner
+          Value: !Ref Owner
+        - Key: pci_scope
+          Value: !Ref PCIScope
+
+  SecretRDSInstanceAttachment:
+    Type: AWS::SecretsManager::SecretTargetAttachment
+    Properties:
+      SecretId: !Ref DatabaseSecret
+      TargetId: !Ref DBInstance
+      TargetType: AWS::RDS::DBInstance
+  
+  SecurityGroupDB:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !If [IsPCI, Fn::FindInMap: [PCINETworking, !Ref Env, VpcId], Fn::FindInMap: [Networking, !Ref Env, VpcId]]
+      GroupDescription: 'Toth RDS server security group'
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        Description: Private subnet A rule to Postgres
+        CidrIp: !If [IsPCI, Fn::FindInMap: [PCINETworking, !Ref Env, CidrIp], Fn::FindInMap: [Networking, !Ref Env, CidrIp]] 
+        FromPort: !Ref Port
+        ToPort: !Ref Port
+
+      Tags:
+        - Key: businnes_unit
+          Value: !Ref BusinessUnit
+        - Key: customer
+          Value: !Ref Customer
+        - Key: env
+          Value: !Ref Env
+        - Key: application
+          Value: !Ref Application
+        - Key: owner
+          Value: !Ref Owner
+        - Key: pci_scope
+          Value: true
+
+  SecurityGroupIngressDevOpsToolsCidr:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+        GroupId: !Ref SecurityGroupDB
+        Description: Security group rule to new DevOps tools CIDR
+        IpProtocol: tcp
+        CidrIp: 10.190.0.0/22
+        FromPort: !Ref Port
+        ToPort: !Ref Port
+
+  SecurityGroupIngressVpn:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+        GroupId: !Ref SecurityGroupDB
+        Description: Security group rule to new Dock - AWS VPN
+        IpProtocol: tcp
+        CidrIp: 192.168.113.0/24
+        FromPort: !Ref Port
+        ToPort: !Ref Port
+
+Outputs:
+  SecurityGroupDB:
+    Value: !Ref SecurityGroupDB
+    Export:
+      Name: 
+        !Join 
+          - '-'
+          - - !Ref DBInstanceName
+            - security-group
+
+  DatabaseAddress:
+    Value: 
+      !Join
+        - ':'
+        - - !GetAtt DBInstance.Endpoint.Address
+          - !GetAtt DBInstance.Endpoint.Port
+
+  DatabaseDNS:
+    Value: !GetAtt DBInstance.Endpoint.Address          
+
+  InstanceName:
+    Description: 'The name of the database instance.'
+    Value: !Ref DBInstance
+
+  SecretArn:
+    Description: 'The ARN of the database secret.'
+    Value: !Ref DatabaseSecret

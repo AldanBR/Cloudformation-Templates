@@ -1,0 +1,356 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: AWS EKS Node Group - EC2
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: EKS Node Group Product Details
+        Parameters:
+          - Env
+          - ClusterName
+          - CertificateAuthorityData
+          - KuberVersion
+          - NodeGroupMinNodes
+          - NodeGroupMaxNodes
+          - NodeGroupDesiredNodes
+          - InstanceType
+          - StartHour
+          - StopHour
+
+
+      - Label:
+          default: Does this resource have Payment Card Information?
+        Parameters:
+          - PCIScope
+
+      - Label:
+          default: Tags
+        Parameters:
+          - BusinessUnit
+          - Customer
+          - Application
+          - Owner
+
+    ParameterLabels: 
+      KuberVersion: 
+        default: "Select the SubVersion of Kubernetes V1:"
+
+
+Parameters:
+  
+  Env:
+    Description: Please specify the Environment this account (dev, qa, hml, prd, shared). Used for tagging
+    Type: String
+    AllowedValues:
+      - dev
+      - qa
+      - hml
+      - prd
+      - shared
+  
+  ClusterName:
+    Type: String
+    Description: Cluster Name  
+
+  CertificateAuthorityData:
+    Type: AWS::SSM::Parameter::Value<String>
+    Description: Please specify the Cluster Name to find Certificate Authority
+
+  KuberVersion:
+    Description: Please specify EKS Kubernetes Sub-Version(For example, select 23 for 1.23)
+    Type: String
+    AllowedValues:
+      - '21'
+      - '22'
+      - '23'
+      - '24'
+
+  NodeGroupMinNodes:
+    Type: Number
+    Description: Minimum size of Node Group ASG
+    Default: 1
+  
+  NodeGroupMaxNodes:
+    Type: Number
+    Description: Maximum size of Node Group ASG. Set to at least 1 greater than NodeAutoScalingGroupDesiredCapacity
+    Default: 3
+  
+  NodeGroupDesiredNodes:
+    Type: Number
+    Description: Desired size of Node Group ASG
+    Default: 1 
+
+  InstanceType:
+    Type: String
+    Description: Instance type
+    AllowedValues:
+      - t3.medium
+      - t3.large
+      - t3.xlarge
+      - t3.2xlarge
+      - c5.large
+      - c5.xlarge
+      - c5.2xlarge
+      - c5.4xlarge
+      - c5.9xlarge
+      - m5.large
+      - m5.xlarge
+      - m5.2xlarge
+      - m5.4xlarge
+      - m5.8xlarge
+      - m5.12xlarge
+      - m5.16xlarge
+      - m5.24xlarge
+      - r5.large
+      - r5.xlarge
+      - r5.2xlarge
+      - r5.4xlarge
+      - r5.8xlarge
+      - r5.12xlarge
+      - r5.24xlarge
+   
+  StartHour:
+    Type: Number
+    MinValue: 0
+    MaxValue: 23
+    Default: 8
+    Description: The hour that the autoscaling start EC2, only Non Prod environment.
+  
+  StopHour:
+    Type: Number
+    MinValue: 0
+    MaxValue: 23
+    Default: 20
+    Description: The hour that the autoscaling stop EC2, only Non Prod environment.
+    
+  BusinessUnit:
+    Description: Please specify the BusinessUnit. Used for taggiPCIScopeng  
+    Type: String
+
+  Customer:
+    Description: Please specify the Customer. Used for tagging  
+    Type: String
+
+  Application:
+    Description: Please specify the Application. Used for tagging  
+    Type: String
+
+  Owner:
+    Description: Please specify the Owner. Used for tagging  
+    Type: String
+
+  PCIScope:
+    Description: Please specify the PCIScope. Used for tagging.
+    Type: String                  
+    AllowedValues:
+      - true
+      - false
+
+Conditions:
+  IsPRD: !Equals [!Ref Env, prd]
+  IsPCI: !Equals [!Ref PCIScope, true]
+  isDev: !Equals [ !Ref Env, dev ]
+
+Mappings:  
+
+  Networking:
+    dev:
+      VpcId: vpc-0df31a6e2d113d8b7
+      CidrIp: 10.214.0.0/16
+      SubnetIds: [subnet-0ca2d45be9d6ab5bc, subnet-0b2b57acbb1da0623, subnet-05d3e7f4611c12a23]
+    qa:
+      VpcId: vpc-053bf362926211174
+      CidrIp: 10.213.0.0/16
+      SubnetIds: [subnet-0fb3b86a8657a696f, subnet-0fb6727ed0041b799, subnet-0c45c1b6d9ba2cfc5]
+    hml:
+      VpcId: vpc-053bf362926211174
+      CidrIp: 10.213.0.0/16
+      SubnetIds: [subnet-0fb3b86a8657a696f, subnet-0fb6727ed0041b799, subnet-0c45c1b6d9ba2cfc5]
+    shared:
+      VpcId: vpc-08288f81ebea271f7
+      CidrIp: 10.196.0.0/17	
+      SubnetIds: [subnet-0e93473763fa450b1, subnet-0b019abba9660ceb5, subnet-08bd332bd2b20e449]
+    prd:
+      VpcId: vpc-05583dab4737e64fd
+      CidrIp: 10.197.128.0/17
+      SubnetIds: [subnet-0a0c6c1b76845ca8a, subnet-0d2dc2da1fb208470, subnet-0446d425f47765e5b]
+
+    
+  PCINETworking:
+    prd:
+      VpcId: vpc-028b0a127e9669159
+      CidrIp: 10.193.0.0/17
+      SubnetIds: [subnet-043f9f65b27011e69, subnet-022a5397e1b41bab5, subnet-0c86f16dcd5f3b1b6]
+    
+
+  ## https://docs.aws.amazon.com/eks/latest/userguide/eks-optimized-ami.html
+
+  Images:
+    us-east-1:
+      '21': ami-0d78302dd24db83c7
+      '22': ami-03a30cc1dda93f173
+      '23': ami-0eb3216fe26784e21
+      '24': ami-06c9b6a12f5bd0a96
+    us-east-2:
+      '21': ami-082ccdd64b87928ba
+      '22': ami-09ae6038e08d7e8ba
+      '23': ami-097b4903ba6f2b624
+      '24': ami-0af5eb518f7616978
+    sa-east-1:
+      '21': ami-0a114e078e20d24ea
+      '22': ami-0b0f5705ef7ed488d
+      '23': ami-0fbea3305671a3c19
+      '24': ami-01e93a8d72b403c87
+
+
+Resources:
+  NodeLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateData:
+        BlockDeviceMappings:
+          - DeviceName: /dev/xvda
+            Ebs:
+              DeleteOnTermination: true
+              VolumeSize: 20
+              VolumeType: gp2 
+        ImageId: !FindInMap [Images, !Ref AWS::Region, !Ref KuberVersion]
+        InstanceType: !Ref InstanceType
+        NetworkInterfaces:
+          - AssociatePublicIpAddress: false
+            DeviceIndex: 0
+            Groups:
+              - !Ref SecurityGroup
+              - Fn::ImportValue:
+                  !Sub "${ClusterName}-EKS-ClusterSecurityGroupId"
+        UserData:     
+          Fn::Base64: !Sub
+            - |
+              #!/bin/bash              
+              /etc/eks/bootstrap.sh ${ClusterName} --b64-cluster-ca ${ClusterCertificateAuthorityData} --apiserver-endpoint ${ClusterEndpoint} --container-runtime containerd
+              yum update -y
+              yum install -y https://s3.us-east-1.amazonaws.com/amazon-ssm-us-east-1/latest/linux_amd64/amazon-ssm-agent.rpm
+              systemctl enable amazon-ssm-agent
+              systemctl start amazon-ssm-agent              
+            - ClusterEndpoint:
+                Fn::ImportValue:
+                  !Sub ${ClusterName}-EKS-ClusterEndpoint
+              ClusterName:
+                Fn::ImportValue: 
+                  !Sub ${ClusterName}-EKS
+              ClusterCertificateAuthorityData: !Ref CertificateAuthorityData
+                  
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: !Sub ${ClusterName}
+          - ResourceType: volume
+            Tags:
+              - Key: Name
+                Value: !Sub ${ClusterName}
+
+  EKSNodeGroup:
+    Type: AWS::EKS::Nodegroup
+    Properties:
+      ClusterName: 
+        Fn::ImportValue: !Sub ${ClusterName}-EKS
+      NodeRole: !GetAtt RoleNodeInstance.Arn 
+      LaunchTemplate:
+        Id: !Ref NodeLaunchTemplate
+        Version: !GetAtt NodeLaunchTemplate.LatestVersionNumber
+      Labels:
+        Key: Name
+        PropagateAtLaunch: true
+        Nodegroup-image: !FindInMap [Images, !Ref AWS::Region, !Ref KuberVersion]
+      ScalingConfig:
+        MinSize: !Ref NodeGroupMinNodes
+        DesiredSize: !Ref NodeGroupDesiredNodes
+        MaxSize: !Ref NodeGroupMaxNodes
+      Subnets: !If [IsPCI, Fn::FindInMap: [PCINETworking, !Ref Env, SubnetIds], Fn::FindInMap: [Networking, !Ref Env, SubnetIds]] 
+      Tags:
+        businnes_unit: !Ref BusinessUnit
+        customer: !Ref Customer
+        env: !Ref Env
+        application: !Ref Application
+        owner: !Ref Owner
+        pci_scope: !Ref PCIScope
+
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow VPC Access
+      SecurityGroupIngress:
+      - CidrIp: !If [IsPCI, Fn::FindInMap: [PCINETworking, !Ref Env, CidrIp], Fn::FindInMap: [Networking, !Ref Env, CidrIp]] 
+        FromPort: 0
+        ToPort: 65535
+        IpProtocol: 'tcp'
+      - CidrIp: 10.190.0.0/22
+        FromPort: 0
+        ToPort: 65535
+        IpProtocol: 'tcp'         
+      SecurityGroupEgress:
+        - Description: Deny outbound traffic
+          IpProtocol: '-1'
+          CidrIp: 127.0.0.0/32        
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Sub: "${AWS::StackName}"
+      VpcId: !If [IsPCI, Fn::FindInMap: [PCINETworking, !Ref Env, VpcId], Fn::FindInMap: [Networking, !Ref Env, VpcId]]
+
+  ScheduledActionOut: 
+    Condition: isDev
+    Type: AWS::AutoScaling::ScheduledAction
+    Properties:
+      AutoScalingGroupName:
+        !Join
+          - "-"
+          - - eks
+            - !Select [2, !Split ["/", !GetAtt EKSNodeGroup.Arn]]
+            - !Select [3, !Split ["/", !GetAtt EKSNodeGroup.Arn]]
+      MinSize: !Ref NodeGroupMinNodes
+      MaxSize: !Ref NodeGroupMaxNodes
+      Recurrence: !Sub 0 ${StartHour} * * *
+      TimeZone: America/Sao_Paulo
+  ScheduledActionIn: 
+    Condition: isDev
+    Type: AWS::AutoScaling::ScheduledAction
+    Properties:
+      AutoScalingGroupName:
+        !Join
+          - "-"
+          - - eks
+            - !Select [2, !Split ["/", !GetAtt EKSNodeGroup.Arn]]
+            - !Select [3, !Split ["/", !GetAtt EKSNodeGroup.Arn]]
+      MaxSize: 0
+      MinSize: 0
+      Recurrence: !Sub 0 ${StopHour} * * *
+      TimeZone: America/Sao_Paulo
+
+  RoleNodeInstance:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+          - arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforSSM
+          - arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
+          - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+          - arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
+      Path: /
+
+  NodeInstanceProfile:
+    Type: "AWS::IAM::InstanceProfile"
+    Properties:
+      Path: /
+      Roles:
+        - Ref: RoleNodeInstance

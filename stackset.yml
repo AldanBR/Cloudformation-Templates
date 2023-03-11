@@ -1,0 +1,45 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Template creates StackSet to AWS Service Catalog - Launch Role Constraint
+
+Parameters:
+  
+  LaunchRoleConstraintName:
+    Description: Please specify the Launch Role Constraint in your S3 Bucket.
+    Type: String
+
+  Description:
+    Type: String
+    Default: StackSet - Description
+
+Resources:
+  StackSetLaunchRoleConstraint:
+    Type: AWS::CloudFormation::StackSet
+    Properties:
+      Capabilities: 
+        - CAPABILITY_NAMED_IAM
+        - CAPABILITY_AUTO_EXPAND 
+      CallAs: DELEGATED_ADMIN
+      Description: !Ref Description
+      Parameters:
+        - ParameterKey: LaunchRoleConstraintName
+          ParameterValue: !Ref LaunchRoleConstraintName
+      ManagedExecution:
+        Active: true
+      OperationPreferences:
+        FailureTolerancePercentage: 10
+        MaxConcurrentPercentage: 50
+        RegionConcurrencyType: PARALLEL  
+      PermissionModel: SERVICE_MANAGED
+      AutoDeployment:
+        Enabled: true
+        RetainStacksOnAccountRemoval: false
+      StackInstancesGroup:
+        - DeploymentTargets:
+              AccountFilterType: NONE
+              OrganizationalUnitIds:
+                - r-ug8l
+          Regions:
+            - us-east-1
+
+      StackSetName: !Sub ${AWS::StackName}
+      TemplateURL: !Sub https://template-service-catalog-prd.s3.us-east-2.amazonaws.com/launch-role-constraints/${LaunchRoleConstraintName}.yml
